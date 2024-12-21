@@ -1,7 +1,9 @@
 let s:bufvarname = 'gitdiff_scratch'
+let s:special_buffer = 'gitdiff_special_buffer'
 
-command! -nargs=* GitVimDiff :call s:git_vim_diff(<q-args>)
+command! -nargs=* GitVimDiff     :call s:git_vim_diff(<q-args>)
 command! -nargs=* GitUnifiedDiff :call s:git_unified_diff(<q-args>)
+command! -nargs=0 GitCdRootDir   :call s:git_cd_rootdir()
 
 function! s:git_vim_diff(q_args) abort
     let curr_ftype = &filetype
@@ -14,17 +16,17 @@ function! s:git_vim_diff(q_args) abort
 
     let relpath = s:get_current_relpath(rootdir)
     if empty(relpath)
-        return s:error('The current buffer is not managed by git repository')
+        return s:echo_error('The current buffer is not managed by git repository')
     endif
 
     let diff_lines = s:git_system(rootdir, ['diff', '--numstat', rev])
     if 0 == len(filter(diff_lines, { i, x -> x =~# '^\d\+\t\d\+\t' .. relpath .. '$' }))
-        return s:error('There are no differences')
+        return s:echo_error('There are no differences')
     endif
 
     let show_lines = s:git_system(rootdir, ['show', rev .. ':' .. relpath])
     if get(show_lines, 0, '') =~# '^fatal: '
-        return s:error(join(show_lines, "\n"))
+        return s:echo_error(join(show_lines, "\n"))
     endif
 
     call s:close_diff_scratches()
@@ -45,49 +47,76 @@ function! s:git_unified_diff(q_args) abort
         return
     endif
 
-    let lines = s:git_system(rootdir, ['diff', '--numstat', '-w'] + split(a:q_args, '\s\+'))
+    let lines = s:git_system(rootdir, ['diff', '--numstat'] + split(a:q_args, '\s\+'))
+    call s:open_special_buffer('numstat', lines)
     if empty(lines)
-        call s:error('No modified files!')
+        call s:echo_error('No modified files!')
     else
-        new
-        setlocal modifiable noreadonly
-        call setbufline(bufnr(), 1, lines)
-        setlocal buftype=nofile nomodifiable readonly nolist
         execute printf('nnoremap <buffer><cr>    <Cmd>call <SID>show_diff(%s,%s)<cr>', string(a:q_args), string(rootdir))
+        execute printf('nnoremap <buffer>!       <Cmd>call <SID>git_unified_diff(%s)<cr>', string(a:q_args))
+    endif
+endfunction
+
+function! s:git_cd_rootdir() abort
+    let rootdir = s:git_get_rootdir()
+    if !empty(rootdir)
+        if !empty(chdir(rootdir))
+            call s:echo_message('Changed to git rootdir:')
+            verbose pwd
+            return
+        endif
+    endif
+    call s:echo_error('Could not find a git rootdir!')
+endfunction
+
+function! s:open_special_buffer(btype, lines) abort
+    let wnr = winnr()
+    let lnum = line('.')
+
+    let exists = v:false
+    for w in filter(getwininfo(), { _, x -> x['tabnr'] == tabpagenr() })
+        if getbufvar(w['bufnr'], s:special_buffer, 0)
+            execute printf('%dwincmd w', w['winnr'])
+            let exists = v:true
+            break
+        endif
+    endfor
+    if !exists
+        if &lines < &columns / 2
+            botright vnew
+        else
+            botright new
+        endif
+    endif
+
+    call setbufvar(bufnr(), s:special_buffer, 1)
+    setlocal nolist
+    execute 'setfiletype ' .. a:btype
+
+    if empty(a:lines)
+        close
+    else
+        setlocal modifiable noreadonly
+        silent! call deletebufline(bufnr(), 1, '$')
+        call setbufline(bufnr(), 1, a:lines)
+        setlocal buftype=nofile nomodifiable readonly
     endif
 endfunction
 
 function! s:show_diff(q_args, rootdir) abort
-    let path = s:fix_path(expand(a:rootdir .. '/' .. trim(get(split(getline('.'), "\t") ,2, ''))))
+    let path = trim(get(split(getline('.'), "\t") ,2, ''))
+    call s:show_diff_with_path(a:q_args, a:rootdir, path)
+endfunction
+
+function! s:show_diff_with_path(q_args, rootdir, path) abort
+    let path = s:fix_path(expand(a:rootdir .. '/' .. a:path))
     if filereadable(path)
-        let wnr = winnr()
-        let lnum = line('.')
-
-        let exists = v:false
-        for w in filter(getwininfo(), { _, x -> x['tabnr'] == tabpagenr() })
-            if getbufvar(w['bufnr'], '&filetype', '') == 'diff'
-                execute printf('%dwincmd w', w['winnr'])
-                let exists = v:true
-                break
-            endif
-        endfor
-        if !exists
-            if &lines < &columns / 2
-                botright vnew
-            else
-                botright new
-            endif
-            setfiletype diff
-            setlocal nolist
+        let lines = s:git_system(a:rootdir, ['--no-pager', 'diff'] + split(a:q_args, '\s\+') + ['--', path])
+        call s:open_special_buffer('diff', lines)
+        if !empty(lines)
+            execute printf('nnoremap <buffer><cr>  <Cmd>call <SID>jump_diffline(%s)<cr>', string(a:rootdir))
+            execute printf('nnoremap <buffer>!     <Cmd>call <SID>show_diff_with_path(%s,%s,%s)<cr>', string(a:q_args), string(a:rootdir), string(a:path))
         endif
-
-        let lines = s:git_system(a:rootdir, ['--no-pager', 'diff', '-w'] + split(a:q_args, '\s\+') + ['--', path])
-        setlocal modifiable noreadonly
-        silent! call deletebufline(bufnr(), 1, '$')
-        call setbufline(bufnr(), 1, lines)
-        setlocal buftype=nofile nomodifiable readonly
-
-        execute printf('nnoremap <buffer><cr>  <Cmd>call <SID>jump_diffline(%s)<cr>', string(a:rootdir))
     endif
 endfunction
 
@@ -216,12 +245,12 @@ endfunction
 
 function! s:check_git(rootdir) abort
     if !executable('git')
-        call s:error('Git command is not executable')
+        call s:echo_error('Git command is not executable')
         return v:false
     endif
 
     if !isdirectory(a:rootdir)
-        call s:error('The current directory is not under git control')
+        call s:echo_error('The current directory is not under git control')
         return v:false
     endif
 
@@ -244,8 +273,14 @@ function! s:fix_path(path) abort
     return substitute(a:path, '[\/]', '/', 'g')
 endfunction
 
-function! s:error(msg) abort
+function! s:echo_error(msg) abort
     echohl Error
+    echo printf('[gitdiff] %s!', a:msg)
+    echohl None
+endfunction
+
+function! s:echo_message(msg) abort
+    echohl Title
     echo printf('[gitdiff] %s!', a:msg)
     echohl None
 endfunction
