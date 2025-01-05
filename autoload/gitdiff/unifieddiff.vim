@@ -1,4 +1,3 @@
-let s:bufvarname = 'gitdiff_scratch'
 let s:special_buffer = 'gitdiff_special_buffer'
 
 function! gitdiff#unifieddiff#exec(q_args) abort
@@ -8,16 +7,32 @@ function! gitdiff#unifieddiff#exec(q_args) abort
     endif
 
     let lines = gitdiff#git_system(rootdir, ['diff', '--numstat'] + split(a:q_args, '\s\+'))
-    call s:open_special_buffer('numstat', lines)
     if empty(lines)
         call gitdiff#echo_error('No modified files!')
     else
-        execute printf('nnoremap <buffer><cr>    <Cmd>call <SID>show_diff(%s,%s)<cr>', string(a:q_args), string(rootdir))
-        execute printf('nnoremap <buffer>!       <Cmd>call <SID>gitdiff#unifieddiff#exec(%s)<cr>', string(a:q_args))
+        if get(g:, 'gitdiff_use_popupwin', v:true)
+            let winid = popup_menu(lines, {
+                \   'padding': [ 1, 1, 1, 1],
+                \   'callback': function('s:selected', [a:q_args, rootdir, lines]),
+                \ })
+            call win_execute(winid, 'runtime syntax/diff.vim')
+            call win_execute(winid, 'call matchadd("diffAdded", "^\\d\\+")')
+            call win_execute(winid, 'call matchadd("diffRemoved", "^\\d\\+\\t\\zs\\d\\+")')
+        else
+            call s:open_special_buffer('numstat', lines)
+            execute printf('nnoremap <buffer><cr>    <Cmd>call <SID>show_diff(%s,%s, getline("."))<cr>', string(a:q_args), string(rootdir))
+            execute printf('nnoremap <buffer>!       <Cmd>call <SID>gitdiff#unifieddiff#exec(%s)<cr>', string(a:q_args))
+        endif
     endif
 endfunction
 
 
+
+function! s:selected(q_args, rootdir, lines, id, result) abort
+    if -1 != a:result
+        call s:show_diff(a:q_args, a:rootdir, a:lines[a:result - 1])
+    endif
+endfunction
 
 function! s:open_special_buffer(btype, lines) abort
     let wnr = winnr()
@@ -53,8 +68,8 @@ function! s:open_special_buffer(btype, lines) abort
     endif
 endfunction
 
-function! s:show_diff(q_args, rootdir) abort
-    let path = trim(get(split(getline('.'), "\t") ,2, ''))
+function! s:show_diff(q_args, rootdir, line) abort
+    let path = trim(get(split(a:line, "\t") ,2, ''))
     call s:show_diff_with_path(a:q_args, a:rootdir, path)
 endfunction
 
