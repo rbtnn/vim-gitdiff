@@ -10,6 +10,7 @@ function! gitdiff#unifieddiff#exec(q_args) abort
     if empty(lines)
         call gitdiff#echo_error('No modified files!')
     else
+        let curr_bufname = get(getbufline('%',1,'$'),3, '')[6:]
         if get(g:, 'gitdiff_use_popupwin', v:true)
             let winid = popup_menu(lines, {
                 \   'padding': [ 1, 1, 1, 1],
@@ -18,6 +19,9 @@ function! gitdiff#unifieddiff#exec(q_args) abort
             call win_execute(winid, 'runtime syntax/diff.vim')
             call win_execute(winid, 'call matchadd("diffAdded", "^\\d\\+")')
             call win_execute(winid, 'call matchadd("diffRemoved", "^\\d\\+\\t\\zs\\d\\+")')
+            if !empty(curr_bufname)
+                call win_execute(winid, printf('call search(''^\d\+\s\+\d\+\s\+%s$'')', curr_bufname))
+            endif
         else
             call s:open_special_buffer('numstat', lines)
             execute printf('nnoremap <buffer><cr>    <Cmd>call <SID>show_diff(%s,%s, getline("."))<cr>', string(a:q_args), string(rootdir))
