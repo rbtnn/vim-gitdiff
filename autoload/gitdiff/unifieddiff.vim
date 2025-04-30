@@ -14,12 +14,17 @@ function! gitdiff#unifieddiff#exec(q_args) abort
     if get(g:, 'gitdiff_use_popupwin', v:true)
       let curr_bufpath = ''
       if &filetype == 'diff'
-        let curr_bufpath = get(getbufline('%', 1, '$'), 3, '')[len('+++ b/'):]
+        for line in getbufline('%', 1, 10)
+          if line =~# '^\(+++\|---\) [ab]/'
+            let curr_bufpath = line[len('+++ b/'):]
+            break
+          endif
+        endfor
       else
         let curr_bufpath = substitute(expand('%:p'), rootdir .. '/\?', '', '')
       endif
       let winid = popup_menu(lines, {
-        \   'padding': [ 1, 1, 1, 1],
+        \   'padding': [1, 1, 1, 1],
         \   'title': printf(' %s ', join(['git'] + cmd)),
         \   'maxwidth': &columns * 2 / 3,
         \   'maxheight': &lines * 2 / 3,
@@ -30,6 +35,7 @@ function! gitdiff#unifieddiff#exec(q_args) abort
       call win_execute(winid, 'call matchadd("diffRemoved", "^\\d\\+\\t\\zs\\d\\+")')
       if !empty(curr_bufpath)
         echo win_execute(winid, printf('call search(''^\d\+\t\d\+\t%s$'')', curr_bufpath))
+        echo win_execute(winid, 'redraw')
       endif
     else
       call s:open_special_buffer('numstat', lines)
