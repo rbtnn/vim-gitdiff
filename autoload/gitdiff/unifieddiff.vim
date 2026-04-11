@@ -24,6 +24,10 @@ function! gitdiff#unifieddiff#exec(q_args) abort
         let curr_bufpath = substitute(expand('%:p'), rootdir .. '/\?', '', '')
       endif
       let winid = popup_menu(lines, {
+        \   'borderchars': [nr2char(0x2500), nr2char(0x2502), nr2char(0x2500), nr2char(0x2502),
+        \                   nr2char(0x256d), nr2char(0x256e), nr2char(0x256f), nr2char(0x2570)],
+        \   'borderhighlight': ['Normal'],
+        \   'highlight': 'Normal',
         \   'padding': [1, 1, 1, 1],
         \   'title': printf(' %s ', join(['git'] + cmd)),
         \   'maxwidth': &columns * 2 / 3,
@@ -93,6 +97,7 @@ function! s:show_diff(q_args, rootdir, line) abort
 endfunction
 
 function! s:show_diff_with_path(q_args, rootdir, path) abort
+  let lnum = &filetype == 'diff' ? line('.') : -1
   let path = gitdiff#fix_path(expand(a:rootdir .. '/' .. a:path))
   if filereadable(path)
     let lines = gitdiff#git_system(a:rootdir, ['--no-pager', 'diff'] + split(a:q_args, '\s\+') + ['--', path])
@@ -100,6 +105,9 @@ function! s:show_diff_with_path(q_args, rootdir, path) abort
     if !empty(lines)
       execute printf('nnoremap <buffer><cr>  <Cmd>call <SID>jump_diffline(%s)<cr>', string(a:rootdir))
       execute printf('nnoremap <buffer>!     <Cmd>call <SID>show_diff_with_path(%s,%s,%s)<cr>', string(a:q_args), string(a:rootdir), string(a:path))
+      if 0 < lnum
+        call cursor([lnum, 1])
+      endif
     endif
   endif
 endfunction
